@@ -115,6 +115,11 @@ main{padding:16px;max-width:760px;margin:0 auto;}
 .tllegend{display:flex;flex-wrap:wrap;gap:10px;margin:-6px 0 14px;}
 .tllegend span{display:flex;align-items:center;gap:4px;font-size:10px;color:var(--dim);}
 .tllegend i{width:7px;height:7px;border-radius:50%;display:inline-block;}
+.timeline.single-mode{border:none;height:auto;overflow:visible;}
+.tlbar{position:relative;display:flex;height:44px;border-radius:7px;overflow:hidden;border:1px solid var(--line);}
+.tlbarlabel{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:rgba(10,11,10,.85);text-shadow:0 1px 0 rgba(255,255,255,.18);pointer-events:none;}
+.tlticks{display:flex;margin-top:4px;}
+.tlticks span{flex-shrink:0;font-family:var(--mono);font-size:9px;color:#565F5C;text-align:left;}
 .beatblock .rangehead{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;}
 .beatblock .rangehead b{font-family:var(--mono);font-size:12px;color:var(--accent2);}
 .warn{background:#241511;border:1px solid #5A2E20;color:#F0B199;border-radius:6px;padding:7px 9px;font-size:11.5px;margin-top:6px;line-height:1.5;}
@@ -191,7 +196,7 @@ label .tip{margin-left:6px;}
 
 <header>
   <div class="dot"></div>
-  <div class="brand"><b>SLATE</b><span>Seedance 2.5 프롬프트 컴파일러 · v1.5.2</span></div>
+  <div class="brand"><b>SLATE</b><span>Seedance 2.5 프롬프트 컴파일러 · v1.5.4</span></div>
   <div class="tabs">
     <button class="tabbtn" id="tab-builder" onclick="setTab('builder')">빌더</button>
     <button class="tabbtn" id="tab-repair" onclick="setTab('repair')">리페어</button>
@@ -641,21 +646,40 @@ function parseDur(range){
 function renderTimeline(){
   if(!S.beats.length) return "";
   const single = S.mode==="short" || S.mode==="i2v" || S.mode==="ext";
+  const durs = S.beats.map(b=>parseDur(b.range)||4);
+
+  if(single){
+    const mv = S.camMoveId ? moveById(S.camMoveId) : null;
+    const bg = mv ? CATS[mv.cat].color : null;
+    const label = mv ? mv.en : "카메라 무브 미선택";
+    const segs = S.beats.map((b,i)=>{
+      const lastBorder = i<S.beats.length-1 ? "border-right:1px solid rgba(0,0,0,.28);" : "";
+      return `<div class="tlseg ${mv?"":"empty"}" style="flex:${durs[i]} 0 0;${bg?`background:${bg};`:""}${lastBorder}" title="${esc(b.range)}"></div>`;
+    }).join("");
+    const ticks = S.beats.map((b,i)=>`<span style="flex:${durs[i]} 0 0;">${esc(b.range)}</span>`).join("");
+    const legend = mv ? `<div class="tllegend"><span><i style="background:${CATS[mv.cat].color}"></i>${CATS[mv.cat].label}</span></div>` : "";
+    const labelStyle = mv ? "" : `style="color:var(--dim);text-shadow:none;"`;
+    return `<div class="timeline single-mode"><div class="tlbar">${segs}<div class="tlbarlabel" ${labelStyle}>${esc(label)}</div></div></div>
+      <div class="tlticks">${ticks}</div>
+      <div class="hint" style="margin:6px 0 12px;">이 카메라 무브 하나가 위 서브젝트 비트 전체에 걸쳐 적용됩니다(원테이크 원칙 — 비트마다 카메라를 따로 정하지 않습니다). 비트별로 다른 카메라를 쓰고 싶다면 '30초 시퀀스' 모드를 사용하세요.</div>
+      ${legend}`;
+  }
+
   const usedCats = new Set();
-  const segs = S.beats.map(b=>{
-    const dur = parseDur(b.range) || 4;
-    const mv = single ? (S.camMoveId?moveById(S.camMoveId):null) : (b.moveId?moveById(b.moveId):null);
+  const segs = S.beats.map((b,i)=>{
+    const mv = b.moveId?moveById(b.moveId):null;
     if(mv) usedCats.add(mv.cat);
     const label = mv ? mv.en : "무브 미선택";
     const cls = mv ? "" : "empty";
     const bg = mv ? `background:${CATS[mv.cat].color};` : "";
-    return `<div class="tlseg ${cls}" style="flex:${dur} 0 0;${bg}" title="${esc(b.range)} · ${esc(label)}">
+    return `<div class="tlseg ${cls}" style="flex:${durs[i]} 0 0;${bg}" title="${esc(b.range)} · ${esc(label)}">
       <span class="tllabel">${esc(label)}</span>
       <span class="tlrange">${esc(b.range)}</span>
     </div>`;
   }).join("");
   const legend = Object.keys(CATS).filter(k=>usedCats.has(k)).map(k=>`<span><i style="background:${CATS[k].color}"></i>${CATS[k].label}</span>`).join("");
-  return `<div class="timeline">${segs}</div>${legend?`<div class="tllegend">${legend}</div>`:""}`;
+  return `<div class="timeline">${segs}</div>${legend?`<div class="tllegend">${legend}</div>`:""}
+    <div class="hint" style="margin:-8px 0 12px;">비트마다 서로 다른 카메라 무브를 하나씩(primary) 고를 수 있습니다.</div>`;
 }
 function scaffoldFor(move){
   let lines = [move.req.map(f=>f+": ").join("\n")];
@@ -664,13 +688,19 @@ function scaffoldFor(move){
 function selectMove(beatIndex, moveId){
   const move = moveById(moveId);
   if(beatIndex===null){
-    if(S.camClause && S.camClause.trim() && !confirm("현재 카메라 클로즈 내용을 새 스캐폴드로 덮어쓸까요?")){ S.camMoveId=moveId; if(S.camSecondaryId===moveId){S.camSecondaryId=null;S.camSecondaryClause="";} render(); return; }
+    if(S.camMoveId===moveId) return; // 이미 선택된 무브를 다시 클릭 — 편집 중인 클로즈를 건드리지 않음
+    if(S.camClause && S.camClause.trim()){
+      if(!confirm("현재 카메라 클로즈 내용을 '"+move.en+"' 스캐폴드로 덮어쓸까요? 취소하면 아무것도 바뀌지 않습니다.")) return;
+    }
     S.camMoveId = moveId;
     S.camClause = scaffoldFor(move);
     if(S.camSecondaryId===moveId){ S.camSecondaryId=null; S.camSecondaryClause=""; }
   } else {
     const b = S.beats[beatIndex];
-    if(b.clause && b.clause.trim() && !confirm("이 비트의 카메라 클로즈를 새 스캐폴드로 덮어쓸까요?")){ b.moveId=moveId; if(b.secondaryMoveId===moveId){b.secondaryMoveId=null;b.secondaryClause="";} render(); return; }
+    if(b.moveId===moveId) return;
+    if(b.clause && b.clause.trim()){
+      if(!confirm("이 비트의 카메라 클로즈 내용을 '"+move.en+"' 스캐폴드로 덮어쓸까요? 취소하면 아무것도 바뀌지 않습니다.")) return;
+    }
     b.moveId = moveId;
     b.clause = scaffoldFor(move);
     if(b.secondaryMoveId===moveId){ b.secondaryMoveId=null; b.secondaryClause=""; }
